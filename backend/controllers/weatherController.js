@@ -1,36 +1,66 @@
-const axios = require('axios');
+// backend/controllers/weatherSearchController.js
+const axios = require("axios");
+require("dotenv").config();
 
-const getCoordinates = async (city) => {
-  const geoURL = `https://geocoding-api.open-meteo.com/v1/search?name=${city}&count=1`;
-  const response = await axios.get(geoURL);
-  const data = response.data;
-  if (data.results && data.results.length > 0) {
-    return data.results[0]; // { latitude, longitude, name, country }
+const API_KEY = process.env.WEATHER_API_KEY;
+
+exports.searchCities = async (req, res) => {
+  const { city } = req.query;
+
+  if (!city || city.trim() === "") {
+    return res.status(400).json({ error: "City is required" });
   }
-  throw new Error('City not found');
-};
 
-const getWeather = async (lat, lon) => {
-  const weatherURL = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,weathercode&timezone=auto`;
-  const response = await axios.get(weatherURL);
-  return response.data;
+  try {
+    const response = await axios.get(
+      `http://api.weatherapi.com/v1/search.json`,
+      {
+        params: {
+          key: API_KEY,
+          q: city.trim(),
+        },
+      }
+    );
+
+    res.json(response.data); // array of matching cities
+  } catch (err) {
+    console.error("City Search Error:", err.message);
+    res.status(400).json({ error: "Search failed" });
+  }
 };
 
 exports.getWeatherByCity = async (req, res) => {
-  const { city } = req.query;
+  const { city, lat, lon } = req.query;
+
+  if ((!city || city.trim() === "") && (!lat || !lon)) {
+    return res.status(400).json({ error: "City or coordinates are required" });
+  }
+
   try {
-    const location = await getCoordinates(city);
-    const weather = await getWeather(location.latitude, location.longitude);
-    res.json({
-      location: {
-        name: location.name,
-        country: location.country,
-        lat: location.latitude,
-        lon: location.longitude,
-      },
-      forecast: weather.daily,
-    });
+    let url = `http://api.weatherapi.com/v1/forecast.json`;
+    let params = { key: API_KEY, days: 5 };
+    if (city && city.trim() !== "") {
+      params.q = city.trim();
+    } else if (lat && lon) {
+      params.q = `${lat},${lon}`;
+    }
+    const response = await axios.get(url, { params });
+    const apiData = response.data;
+    // Transform to match frontend expectations
+    const location = {
+      name: apiData.location.name,
+      country: apiData.location.country,
+    };
+    const forecast = apiData.forecast.forecastday.map(day => ({
+      date: day.date,
+      icon: day.day.condition.icon,
+      condition: day.day.condition.text,
+      max: day.day.maxtemp_c,
+      min: day.day.mintemp_c,
+    }));
+    res.json({ location, forecast });
   } catch (err) {
-    res.status(400).json({ error: err.message || 'Error fetching weather data' });
+    console.error("Weather Lookup Error:", err.message);
+    res.status(400).json({ error: "Weather lookup failed" });
   }
 };
